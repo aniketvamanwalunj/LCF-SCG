@@ -5,16 +5,32 @@ import uuid
 import tempfile
 import zipfile
 import re
+import subprocess
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
 from docxtpl import DocxTemplate
-from docx2pdf import convert
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
+
+# ----------------------------
+# DOCX → PDF using LibreOffice
+# ----------------------------
+def convert_to_pdf(docx_path, output_dir):
+
+    subprocess.run([
+        "libreoffice",
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        output_dir,
+        docx_path
+    ], check=True)
+
 
 # ----------------------------
 # Safe filename
@@ -24,6 +40,7 @@ def sanitize_filename(name: str):
     name = re.sub(r"\s+", " ", name).strip()
     name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
+
 
 # ----------------------------
 # Render filename
@@ -56,6 +73,7 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
+
 
 # ----------------------------
 # Main Route
@@ -146,14 +164,14 @@ def index():
                 base_name = render_filename(filename_template, row, i)
 
                 docx_path = os.path.join(tmpdir, base_name + ".docx")
-                pdf_path = os.path.join(pdf_dir, base_name + ".pdf")
 
                 try:
 
                     doc.render(context)
                     doc.save(docx_path)
 
-                    convert(docx_path, pdf_path)
+                    # Convert DOCX → PDF
+                    convert_to_pdf(docx_path, pdf_dir)
 
                     success += 1
                     status = "Success"
@@ -209,6 +227,7 @@ def index():
 
     return render_template("index.html")
 
+
 # ----------------------------
 # Download ZIP
 # ----------------------------
@@ -226,6 +245,7 @@ def download_zip(zip_id):
         download_name="Certificates.zip",
         mimetype="application/zip",
     )
+
 
 # ----------------------------
 # Start Server
