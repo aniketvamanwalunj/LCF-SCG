@@ -15,6 +15,7 @@ font-family:system-ui;
 background:#f3f4f6;
 color:#111827;
 display:flex;
+flex-direction:column;
 align-items:center;
 justify-content:center;
 min-height:100vh;
@@ -35,8 +36,24 @@ box-shadow:0 12px 30px rgba(0,0,0,0.12);
 
 h1{
 margin:0;
-font-size:24px;
+font-size:26px;
 text-align:center;
+}
+
+/* Animated Line */
+
+.title-line{
+width:0%;
+height:3px;
+background:#2563eb;
+margin:8px auto 6px auto;
+border-radius:3px;
+animation:lineGrow 1.4s ease forwards;
+}
+
+@keyframes lineGrow{
+from{width:0}
+to{width:220px}
 }
 
 .tagline{
@@ -48,7 +65,16 @@ color:#374151;
 
 .subtitle{
 text-align:center;
-margin-top:4px;
+margin-top:6px;
+}
+
+.designer{
+font-size:15px;
+font-weight:700;
+color:#111827;
+}
+
+.for-line{
 font-size:13px;
 color:#6b7280;
 }
@@ -174,6 +200,20 @@ margin-bottom:8px;
 to{transform:rotate(360deg)}
 }
 
+/* Footer */
+
+.footer{
+margin-top:14px;
+font-size:12px;
+color:#6b7280;
+text-align:center;
+line-height:1.6;
+}
+
+.footer b{
+color:#111827;
+}
+
 </style>
 </head>
 
@@ -203,13 +243,22 @@ Preparing ZIP file
 
 <h1>Lighthouse - Skilling Certificate Generator</h1>
 
+<div class="title-line"></div>
+
 <div class="tagline">
 Automatically generate skilling certificates using Excel data
 </div>
 
 <div class="subtitle">
-Designed by: Aniket Walunj | OE & Data Analyst Trainer<br>
-For: Prasenjit Bansod | NSDC Data Analyst
+
+<div class="designer">
+Developed by: Aniket Walunj | OE & Data Analyst Trainer
+</div>
+
+<div class="for-line">
+For: Prasenjit Bansod | NSDC Data Intern
+</div>
+
 </div>
 
 <p style="margin-top:8px">
@@ -285,11 +334,8 @@ Generate Certificates
 <div class="result-row">
 
 <span><b>Total:</b> {{result.total}}</span>
-
 <span><b>Success:</b> {{result.success}}</span>
-
 <span><b>Errors:</b> {{result.error}}</span>
-
 <span><b>Time:</b> {{result.time}}</span>
 
 </div>
@@ -299,11 +345,9 @@ Generate Certificates
 <div style="text-align:center">
 
 <a href="{{ url_for('download_zip', zip_id=result.zip_id) }}">
-
 <button>
 Download PDF Certificates
 </button>
-
 </a>
 
 </div>
@@ -313,6 +357,19 @@ Download PDF Certificates
 {% endif %}
 
 </div>
+
+<div class="footer">
+
+<div>
+Developed & Maintained by <b>Aniket Walunj</b>
+</div>
+
+<div>
+© 11-03-2026 | Certificate Generator | All rights reserved
+</div>
+
+</div>
+
 </div>
 
 <script>
