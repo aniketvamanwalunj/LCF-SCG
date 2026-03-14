@@ -9,7 +9,6 @@ import re
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
 from docxtpl import DocxTemplate
-from docx2pdf import convert
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
@@ -109,8 +108,8 @@ def index():
                 flash(f"Missing required Excel columns: {', '.join(missing)}")
                 return redirect(url_for("index"))
 
-            pdf_dir = os.path.join(tmpdir, "PDF")
-            os.makedirs(pdf_dir, exist_ok=True)
+            docx_dir = os.path.join(tmpdir, "DOCX")
+            os.makedirs(docx_dir, exist_ok=True)
 
             success = 0
             errors = 0
@@ -123,7 +122,6 @@ def index():
                 grade = str(row["grade"])
                 place = str(row["place"])
 
-                # Format date -> January 2026
                 try:
                     date = pd.to_datetime(row["date"]).strftime("%B %Y")
                 except:
@@ -147,15 +145,12 @@ def index():
 
                 base_name = render_filename(filename_template, row, i)
 
-                docx_path = os.path.join(tmpdir, base_name + ".docx")
-                pdf_path = os.path.join(pdf_dir, base_name + ".pdf")
+                docx_path = os.path.join(docx_dir, base_name + ".docx")
 
                 try:
 
                     doc.render(context)
                     doc.save(docx_path)
-
-                    convert(docx_path, pdf_path)
 
                     success += 1
                     status = "Success"
@@ -168,7 +163,7 @@ def index():
                 report_rows.append(
                     {
                         "name": name,
-                        "filename": base_name + ".pdf",
+                        "filename": base_name + ".docx",
                         "status": status,
                     }
                 )
@@ -177,8 +172,8 @@ def index():
 
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                for f in os.listdir(pdf_dir):
-                    zipf.write(os.path.join(pdf_dir, f), f)
+                for f in os.listdir(docx_dir):
+                    zipf.write(os.path.join(docx_dir, f), f)
 
                 report_df = pd.DataFrame(report_rows)
 
