@@ -5,32 +5,16 @@ import uuid
 import tempfile
 import zipfile
 import re
-import subprocess
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
 from docxtpl import DocxTemplate
+from docx2pdf import convert
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
-
-# ----------------------------
-# DOCX → PDF using LibreOffice
-# ----------------------------
-def convert_to_pdf(docx_path, output_dir):
-
-    subprocess.run([
-        "libreoffice",
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        output_dir,
-        docx_path
-    ], check=True)
-
 
 # ----------------------------
 # Safe filename
@@ -48,7 +32,7 @@ def sanitize_filename(name: str):
 def render_filename(template, row, idx):
 
     try:
-        date_val = pd.to_datetime(row.get("date", "")).strftime("%b/%Y")
+        date_val = pd.to_datetime(row.get("date", "")).strftime("%B %Y")
     except:
         date_val = str(row.get("date", ""))
 
@@ -139,9 +123,9 @@ def index():
                 grade = str(row["grade"])
                 place = str(row["place"])
 
-                # Format date -> Feb/2026
+                # Format date -> January 2026
                 try:
-                    date = pd.to_datetime(row["date"]).strftime("%b/%Y")
+                    date = pd.to_datetime(row["date"]).strftime("%B %Y")
                 except:
                     date = str(row["date"])
 
@@ -164,14 +148,14 @@ def index():
                 base_name = render_filename(filename_template, row, i)
 
                 docx_path = os.path.join(tmpdir, base_name + ".docx")
+                pdf_path = os.path.join(pdf_dir, base_name + ".pdf")
 
                 try:
 
                     doc.render(context)
                     doc.save(docx_path)
 
-                    # Convert DOCX → PDF
-                    convert_to_pdf(docx_path, pdf_dir)
+                    convert(docx_path, pdf_path)
 
                     success += 1
                     status = "Success"
