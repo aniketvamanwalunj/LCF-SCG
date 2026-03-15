@@ -9,13 +9,13 @@ import re
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
 from docxtpl import DocxTemplate
-from docx import Document
-from weasyprint import HTML
+from docx2pdf import convert
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
+
 
 # ----------------------------
 # Safe filename
@@ -26,21 +26,6 @@ def sanitize_filename(name: str):
     name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
 
-# ----------------------------
-# DOCX → HTML converter
-# ----------------------------
-def docx_to_html(docx_path):
-
-    doc = Document(docx_path)
-
-    html = "<html><body style='text-align:center;font-family:Arial;'>"
-
-    for para in doc.paragraphs:
-        html += f"<p>{para.text}</p>"
-
-    html += "</body></html>"
-
-    return html
 
 # ----------------------------
 # Safe Date Format
@@ -58,8 +43,9 @@ def format_date(value, format_type="month"):
     except:
         return str(value)
 
+
 # ----------------------------
-# Check missing values
+# Check if required value missing
 # ----------------------------
 def is_missing(value):
 
@@ -70,6 +56,7 @@ def is_missing(value):
         return True
 
     return False
+
 
 # ----------------------------
 # Render filename
@@ -95,6 +82,7 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
+
 
 # ----------------------------
 # Main Route
@@ -161,6 +149,7 @@ def index():
                 date_val = row["date"]
                 place = row["place"]
 
+                # 🚨 Check required values
                 if (
                     is_missing(name)
                     or is_missing(course)
@@ -210,9 +199,7 @@ def index():
                     doc.render(context)
                     doc.save(docx_path)
 
-                    html_content = docx_to_html(docx_path)
-
-                    HTML(string=html_content).write_pdf(pdf_path)
+                    convert(docx_path, pdf_path)
 
                     success += 1
                     status = "Success"
@@ -268,6 +255,7 @@ def index():
 
     return render_template("index.html")
 
+
 # ----------------------------
 # Download ZIP
 # ----------------------------
@@ -285,6 +273,7 @@ def download_zip(zip_id):
         download_name="Certificates.zip",
         mimetype="application/zip",
     )
+
 
 # ----------------------------
 # Start Server
