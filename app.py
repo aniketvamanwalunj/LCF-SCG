@@ -8,7 +8,6 @@ import re
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
-from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -16,7 +15,6 @@ app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
 
-env = Environment(loader=FileSystemLoader("templates"))
 
 # ----------------------------
 # Safe filename
@@ -26,6 +24,7 @@ def sanitize_filename(name: str):
     name = re.sub(r"\s+", " ", name).strip()
     name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
+
 
 # ----------------------------
 # Date formatter
@@ -43,6 +42,7 @@ def format_date(value, format_type="month"):
     except:
         return str(value)
 
+
 # ----------------------------
 # Check missing values
 # ----------------------------
@@ -56,18 +56,16 @@ def is_missing(value):
 
     return False
 
+
 # ----------------------------
 # Filename rendering
 # ----------------------------
 def render_filename(template, row, idx):
 
-    date_val = format_date(row.get("date"), "month")
-
     values = {
         "name": str(row.get("name", "")).strip(),
         "course": str(row.get("course", "")).strip(),
         "index": str(idx),
-        "date": date_val,
     }
 
     result = template
@@ -76,6 +74,69 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
+
+
+# ----------------------------
+# Create HTML certificate
+# ----------------------------
+def build_certificate_html(context):
+
+    return f"""
+    <html>
+    <head>
+    <style>
+    body {{
+        text-align:center;
+        font-family:Arial;
+        padding-top:150px;
+    }}
+
+    h1 {{
+        font-size:40px;
+    }}
+
+    .name {{
+        font-size:46px;
+        font-weight:bold;
+        margin:20px 0;
+    }}
+
+    .course {{
+        font-size:26px;
+    }}
+
+    .small {{
+        font-size:18px;
+        margin-top:20px;
+    }}
+
+    </style>
+    </head>
+
+    <body>
+
+    <h1>Certificate of Completion</h1>
+
+    <p>This is to certify that</p>
+
+    <div class="name">{context['name']}</div>
+
+    <p>has successfully completed</p>
+
+    <div class="course">{context['course']}</div>
+
+    <div class="small">Grade: {context['grade']}</div>
+
+    <div class="small">{context['place']}</div>
+
+    <div class="small">{context['date']}</div>
+
+    <div class="small">{context['issue_date']}</div>
+
+    </body>
+    </html>
+    """
+
 
 # ----------------------------
 # Main Route
@@ -126,8 +187,6 @@ def index():
             errors = 0
             report_rows = []
 
-            template = env.get_template("certificate.html")
-
             for i, (_, row) in enumerate(df.iterrows(), start=1):
 
                 name = row["name"]
@@ -173,7 +232,7 @@ def index():
                     "issue_date": issue_date,
                 }
 
-                html_out = template.render(context)
+                html_content = build_certificate_html(context)
 
                 base_name = render_filename(filename_template, row, i)
 
@@ -181,7 +240,7 @@ def index():
 
                 try:
 
-                    HTML(string=html_out).write_pdf(pdf_path)
+                    HTML(string=html_content).write_pdf(pdf_path)
 
                     success += 1
                     status = "Success"
@@ -230,16 +289,13 @@ def index():
                 "error": errors,
                 "time": f"{elapsed:.2f} sec",
                 "zip_id": zip_id,
-                "filename_template": filename_template,
             }
 
             return render_template("index.html", result=result)
 
     return render_template("index.html")
 
-# ----------------------------
-# Download ZIP
-# ----------------------------
+
 @app.route("/download/<zip_id>")
 def download_zip(zip_id):
 
@@ -255,9 +311,7 @@ def download_zip(zip_id):
         mimetype="application/zip",
     )
 
-# ----------------------------
-# Start Server
-# ----------------------------
+
 if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
