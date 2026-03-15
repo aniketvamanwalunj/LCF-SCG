@@ -5,6 +5,7 @@ import uuid
 import tempfile
 import zipfile
 import re
+import subprocess
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
@@ -14,6 +15,7 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
+
 
 # ----------------------------
 # Safe filename
@@ -26,19 +28,59 @@ def sanitize_filename(name: str):
 
 
 # ----------------------------
-# Render filename
+# Date formatter
+# ----------------------------
+def format_date(value, format_type="month"):
+
+    if pd.isna(value) or str(value).strip() == "":
+        return ""
+
+    try:
+        if format_type == "month":
+            return pd.to_datetime(value).strftime("%B %Y")
+        elif format_type == "issue":
+            return pd.to_datetime(value).strftime("%d-%m-%Y")
+    except:
+        return str(value)
+
+
+# ----------------------------
+# Check missing values
+# ----------------------------
+def is_missing(value):
+
+    if pd.isna(value):
+        return True
+
+    if str(value).strip() == "":
+        return True
+
+    return False
+
+
+# ----------------------------
+# LibreOffice DOCX → PDF
+# ----------------------------
+def convert_docx_to_pdf(docx_dir, output_dir):
+
+    subprocess.run([
+        "libreoffice",
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        output_dir,
+        docx_dir
+    ], check=True)
+
+
+# ----------------------------
+# Filename rendering
 # ----------------------------
 def render_filename(template, row, idx):
 
-    try:
-        date_val = pd.to_datetime(row.get("date", "")).strftime("%B %Y")
-    except:
-        date_val = str(row.get("date", ""))
-
-    try:
-        issue_date_val = pd.to_datetime(row.get("issue_date", "")).strftime("%d-%m-%Y")
-    except:
-        issue_date_val = str(row.get("issue_date", ""))
+    date_val = format_date(row.get("date"), "month")
+    issue_date_val = format_date(row.get("issue_date"), "issue")
 
     values = {
         "name": str(row.get("name", "")).strip(),
@@ -87,11 +129,7 @@ def index():
             excel_file.save(excel_path)
             template_file.save(template_path)
 
-            try:
-                df = pd.read_excel(excel_path)
-            except Exception as e:
-                flash(f"Unable to read Excel file: {e}")
-                return redirect(url_for("index"))
+            df = pd.read_excel(excel_path)
 
             required_cols = [
                 "name",
@@ -109,28 +147,53 @@ def index():
                 return redirect(url_for("index"))
 
             docx_dir = os.path.join(tmpdir, "DOCX")
+            pdf_dir = os.path.join(tmpdir, "PDF")
+
             os.makedirs(docx_dir, exist_ok=True)
+            os.makedirs(pdf_dir, exist_ok=True)
 
             success = 0
             errors = 0
             report_rows = []
 
+            # ----------------------------
+            # Generate DOCX files
+            # ----------------------------
             for i, (_, row) in enumerate(df.iterrows(), start=1):
 
-                name = str(row["name"])
-                course = str(row["course"])
-                grade = str(row["grade"])
-                place = str(row["place"])
+                name = row["name"]
+                course = row["course"]
+                grade = row["grade"]
+                date_val = row["date"]
+                place = row["place"]
 
-                try:
-                    date = pd.to_datetime(row["date"]).strftime("%B %Y")
-                except:
-                    date = str(row["date"])
+                if (
+                    is_missing(name)
+                    or is_missing(course)
+                    or is_missing(grade)
+                    or is_missing(date_val)
+                    or is_missing(place)
+                ):
 
-                try:
-                    issue_date = pd.to_datetime(row["issue_date"]).strftime("%d-%m-%Y")
-                except:
-                    issue_date = str(row["issue_date"])
+                    errors += 1
+
+                    report_rows.append(
+                        {
+                            "name": str(name),
+                            "filename": "Not Generated",
+                            "status": "Error: Missing required value",
+                        }
+                    )
+
+                    continue
+
+                name = str(name)
+                course = str(course)
+                grade = str(grade)
+                place = str(place)
+
+                date = format_date(date_val, "month")
+                issue_date = format_date(row["issue_date"], "issue")
 
                 doc = DocxTemplate(template_path)
 
@@ -153,27 +216,38 @@ def index():
                     doc.save(docx_path)
 
                     success += 1
-                    status = "Success"
 
                 except Exception as e:
 
                     errors += 1
-                    status = f"Error: {e}"
 
-                report_rows.append(
-                    {
-                        "name": name,
-                        "filename": base_name + ".docx",
-                        "status": status,
-                    }
+                    report_rows.append(
+                        {
+                            "name": name,
+                            "filename": base_name,
+                            "status": f"Error: {e}",
+                        }
+                    )
+
+            # ----------------------------
+            # Batch convert DOCX → PDF
+            # ----------------------------
+            for file in os.listdir(docx_dir):
+
+                convert_docx_to_pdf(
+                    os.path.join(docx_dir, file),
+                    pdf_dir
                 )
 
+            # ----------------------------
+            # Create ZIP
+            # ----------------------------
             zip_buffer = io.BytesIO()
 
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                for f in os.listdir(docx_dir):
-                    zipf.write(os.path.join(docx_dir, f), f)
+                for f in os.listdir(pdf_dir):
+                    zipf.write(os.path.join(pdf_dir, f), f)
 
                 report_df = pd.DataFrame(report_rows)
 
