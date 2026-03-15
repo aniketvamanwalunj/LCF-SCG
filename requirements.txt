@@ -1,7 +1,5 @@
 Flask
 pandas
 docxtpl
-python-docx
-weasyprint
 openpyxl
 gunicorn
