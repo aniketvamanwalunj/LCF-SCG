@@ -5,17 +5,18 @@ import uuid
 import tempfile
 import zipfile
 import re
-import subprocess
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
-from docxtpl import DocxTemplate
+from jinja2 import Environment, FileSystemLoader
+from weasyprint import HTML
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
 
+env = Environment(loader=FileSystemLoader("templates"))
 
 # ----------------------------
 # Safe filename
@@ -25,7 +26,6 @@ def sanitize_filename(name: str):
     name = re.sub(r"\s+", " ", name).strip()
     name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
-
 
 # ----------------------------
 # Date formatter
@@ -43,7 +43,6 @@ def format_date(value, format_type="month"):
     except:
         return str(value)
 
-
 # ----------------------------
 # Check missing values
 # ----------------------------
@@ -57,39 +56,18 @@ def is_missing(value):
 
     return False
 
-
-# ----------------------------
-# LibreOffice DOCX → PDF
-# ----------------------------
-def convert_docx_to_pdf(docx_dir, output_dir):
-
-    subprocess.run([
-        "libreoffice",
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        output_dir,
-        docx_dir
-    ], check=True)
-
-
 # ----------------------------
 # Filename rendering
 # ----------------------------
 def render_filename(template, row, idx):
 
     date_val = format_date(row.get("date"), "month")
-    issue_date_val = format_date(row.get("issue_date"), "issue")
 
     values = {
         "name": str(row.get("name", "")).strip(),
         "course": str(row.get("course", "")).strip(),
-        "grade": str(row.get("grade", "")).strip(),
-        "date": date_val,
-        "place": str(row.get("place", "")).strip(),
-        "issue_date": issue_date_val,
         "index": str(idx),
+        "date": date_val,
     }
 
     result = template
@@ -98,7 +76,6 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
-
 
 # ----------------------------
 # Main Route
@@ -111,23 +88,19 @@ def index():
         start_time = time.perf_counter()
 
         excel_file = request.files.get("employees_file")
-        template_file = request.files.get("template_file")
 
         filename_template = request.form.get(
-            "filename_template", "{name} - {course} Certificate"
+            "filename_template", "{name} Certificate"
         ).strip()
 
-        if not excel_file or not template_file:
-            flash("Please upload Excel file and Certificate Template.")
+        if not excel_file:
+            flash("Please upload Excel file.")
             return redirect(url_for("index"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
             excel_path = os.path.join(tmpdir, "data.xlsx")
-            template_path = os.path.join(tmpdir, "template.docx")
-
             excel_file.save(excel_path)
-            template_file.save(template_path)
 
             df = pd.read_excel(excel_path)
 
@@ -146,19 +119,15 @@ def index():
                 flash(f"Missing required Excel columns: {', '.join(missing)}")
                 return redirect(url_for("index"))
 
-            docx_dir = os.path.join(tmpdir, "DOCX")
             pdf_dir = os.path.join(tmpdir, "PDF")
-
-            os.makedirs(docx_dir, exist_ok=True)
             os.makedirs(pdf_dir, exist_ok=True)
 
             success = 0
             errors = 0
             report_rows = []
 
-            # ----------------------------
-            # Generate DOCX files
-            # ----------------------------
+            template = env.get_template("certificate.html")
+
             for i, (_, row) in enumerate(df.iterrows(), start=1):
 
                 name = row["name"]
@@ -195,8 +164,6 @@ def index():
                 date = format_date(date_val, "month")
                 issue_date = format_date(row["issue_date"], "issue")
 
-                doc = DocxTemplate(template_path)
-
                 context = {
                     "name": name,
                     "course": course,
@@ -206,42 +173,32 @@ def index():
                     "issue_date": issue_date,
                 }
 
+                html_out = template.render(context)
+
                 base_name = render_filename(filename_template, row, i)
 
-                docx_path = os.path.join(docx_dir, base_name + ".docx")
+                pdf_path = os.path.join(pdf_dir, base_name + ".pdf")
 
                 try:
 
-                    doc.render(context)
-                    doc.save(docx_path)
+                    HTML(string=html_out).write_pdf(pdf_path)
 
                     success += 1
+                    status = "Success"
 
                 except Exception as e:
 
                     errors += 1
+                    status = f"Error: {e}"
 
-                    report_rows.append(
-                        {
-                            "name": name,
-                            "filename": base_name,
-                            "status": f"Error: {e}",
-                        }
-                    )
-
-            # ----------------------------
-            # Batch convert DOCX → PDF
-            # ----------------------------
-            for file in os.listdir(docx_dir):
-
-                convert_docx_to_pdf(
-                    os.path.join(docx_dir, file),
-                    pdf_dir
+                report_rows.append(
+                    {
+                        "name": name,
+                        "filename": base_name + ".pdf",
+                        "status": status,
+                    }
                 )
 
-            # ----------------------------
-            # Create ZIP
-            # ----------------------------
             zip_buffer = io.BytesIO()
 
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -280,7 +237,6 @@ def index():
 
     return render_template("index.html")
 
-
 # ----------------------------
 # Download ZIP
 # ----------------------------
@@ -298,7 +254,6 @@ def download_zip(zip_id):
         download_name="Certificates.zip",
         mimetype="application/zip",
     )
-
 
 # ----------------------------
 # Start Server
