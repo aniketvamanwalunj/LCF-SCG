@@ -8,13 +8,14 @@ import re
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
+from docxtpl import DocxTemplate
+from docx import Document
 from weasyprint import HTML
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
-
 
 # ----------------------------
 # Safe filename
@@ -25,9 +26,24 @@ def sanitize_filename(name: str):
     name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
 
+# ----------------------------
+# DOCX → HTML converter
+# ----------------------------
+def docx_to_html(docx_path):
+
+    doc = Document(docx_path)
+
+    html = "<html><body style='text-align:center;font-family:Arial;'>"
+
+    for para in doc.paragraphs:
+        html += f"<p>{para.text}</p>"
+
+    html += "</body></html>"
+
+    return html
 
 # ----------------------------
-# Date formatter
+# Safe Date Format
 # ----------------------------
 def format_date(value, format_type="month"):
 
@@ -42,7 +58,6 @@ def format_date(value, format_type="month"):
     except:
         return str(value)
 
-
 # ----------------------------
 # Check missing values
 # ----------------------------
@@ -56,15 +71,21 @@ def is_missing(value):
 
     return False
 
-
 # ----------------------------
-# Filename rendering
+# Render filename
 # ----------------------------
 def render_filename(template, row, idx):
+
+    date_val = format_date(row.get("date"), "month")
+    issue_date_val = format_date(row.get("issue_date"), "issue")
 
     values = {
         "name": str(row.get("name", "")).strip(),
         "course": str(row.get("course", "")).strip(),
+        "grade": str(row.get("grade", "")).strip(),
+        "date": date_val,
+        "place": str(row.get("place", "")).strip(),
+        "issue_date": issue_date_val,
         "index": str(idx),
     }
 
@@ -74,69 +95,6 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
-
-
-# ----------------------------
-# Create HTML certificate
-# ----------------------------
-def build_certificate_html(context):
-
-    return f"""
-    <html>
-    <head>
-    <style>
-    body {{
-        text-align:center;
-        font-family:Arial;
-        padding-top:150px;
-    }}
-
-    h1 {{
-        font-size:40px;
-    }}
-
-    .name {{
-        font-size:46px;
-        font-weight:bold;
-        margin:20px 0;
-    }}
-
-    .course {{
-        font-size:26px;
-    }}
-
-    .small {{
-        font-size:18px;
-        margin-top:20px;
-    }}
-
-    </style>
-    </head>
-
-    <body>
-
-    <h1>Certificate of Completion</h1>
-
-    <p>This is to certify that</p>
-
-    <div class="name">{context['name']}</div>
-
-    <p>has successfully completed</p>
-
-    <div class="course">{context['course']}</div>
-
-    <div class="small">Grade: {context['grade']}</div>
-
-    <div class="small">{context['place']}</div>
-
-    <div class="small">{context['date']}</div>
-
-    <div class="small">{context['issue_date']}</div>
-
-    </body>
-    </html>
-    """
-
 
 # ----------------------------
 # Main Route
@@ -149,21 +107,29 @@ def index():
         start_time = time.perf_counter()
 
         excel_file = request.files.get("employees_file")
+        template_file = request.files.get("template_file")
 
         filename_template = request.form.get(
-            "filename_template", "{name} Certificate"
+            "filename_template", "{name} - {course} Certificate"
         ).strip()
 
-        if not excel_file:
-            flash("Please upload Excel file.")
+        if not excel_file or not template_file:
+            flash("Please upload Excel file and Certificate Template.")
             return redirect(url_for("index"))
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
             excel_path = os.path.join(tmpdir, "data.xlsx")
-            excel_file.save(excel_path)
+            template_path = os.path.join(tmpdir, "template.docx")
 
-            df = pd.read_excel(excel_path)
+            excel_file.save(excel_path)
+            template_file.save(template_path)
+
+            try:
+                df = pd.read_excel(excel_path)
+            except Exception as e:
+                flash(f"Unable to read Excel file: {e}")
+                return redirect(url_for("index"))
 
             required_cols = [
                 "name",
@@ -223,6 +189,8 @@ def index():
                 date = format_date(date_val, "month")
                 issue_date = format_date(row["issue_date"], "issue")
 
+                doc = DocxTemplate(template_path)
+
                 context = {
                     "name": name,
                     "course": course,
@@ -232,13 +200,17 @@ def index():
                     "issue_date": issue_date,
                 }
 
-                html_content = build_certificate_html(context)
-
                 base_name = render_filename(filename_template, row, i)
 
+                docx_path = os.path.join(tmpdir, base_name + ".docx")
                 pdf_path = os.path.join(pdf_dir, base_name + ".pdf")
 
                 try:
+
+                    doc.render(context)
+                    doc.save(docx_path)
+
+                    html_content = docx_to_html(docx_path)
 
                     HTML(string=html_content).write_pdf(pdf_path)
 
@@ -289,13 +261,16 @@ def index():
                 "error": errors,
                 "time": f"{elapsed:.2f} sec",
                 "zip_id": zip_id,
+                "filename_template": filename_template,
             }
 
             return render_template("index.html", result=result)
 
     return render_template("index.html")
 
-
+# ----------------------------
+# Download ZIP
+# ----------------------------
 @app.route("/download/<zip_id>")
 def download_zip(zip_id):
 
@@ -311,7 +286,9 @@ def download_zip(zip_id):
         mimetype="application/zip",
     )
 
-
+# ----------------------------
+# Start Server
+# ----------------------------
 if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
