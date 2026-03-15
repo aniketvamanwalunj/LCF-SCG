@@ -5,16 +5,17 @@ import uuid
 import tempfile
 import zipfile
 import re
-import subprocess
 
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 import pandas as pd
 from docxtpl import DocxTemplate
+from docx2pdf import convert
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = "super-secret-key"
 
 GENERATED_ZIPS = {}
+
 
 # ----------------------------
 # Safe filename
@@ -22,8 +23,9 @@ GENERATED_ZIPS = {}
 def sanitize_filename(name: str):
     name = re.sub(r"[\\/]+", "-", name)
     name = re.sub(r"\s+", " ", name).strip()
-    name = re.sub(r"[:\\*\\?\"<>\\|]+", "", name)
+    name = re.sub(r"[:\*\?\"<>\|]+", "", name)
     return name or "file"
+
 
 # ----------------------------
 # Safe Date Format
@@ -38,8 +40,9 @@ def format_date(value, format_type="month"):
             return pd.to_datetime(value).strftime("%B %Y")
         elif format_type == "issue":
             return pd.to_datetime(value).strftime("%d-%m-%Y")
-    except Exception:
+    except:
         return str(value)
+
 
 # ----------------------------
 # Check if required value missing
@@ -54,39 +57,6 @@ def is_missing(value):
 
     return False
 
-# ----------------------------
-# DOCX -> PDF via LibreOffice
-# ----------------------------
-def docx_to_pdf_libreoffice(docx_path: str, output_dir: str):
-    """
-    Convert a DOCX file to PDF using LibreOffice (soffice) in headless mode.
-    Assumes 'libreoffice' or 'soffice' is installed and in PATH.
-    """
-    # Use 'libreoffice' or 'soffice' depending on image; both usually work.
-    cmd = [
-        "libreoffice",
-        "--headless",
-        "--norestore",
-        "--invisible",
-        "--nodefault",
-        "--nofirststartwizard",
-        "--nolockcheck",
-        "--nologo",
-        "--convert-to", "pdf:writer_pdf_Export",
-        "--outdir", output_dir,
-        docx_path,
-    ]
-    # If your container only has 'soffice' name, you can change first element to "soffice".
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"LibreOffice conversion failed: {result.stderr.strip() or result.stdout.strip()}"
-        )
 
 # ----------------------------
 # Render filename
@@ -112,6 +82,7 @@ def render_filename(template, row, idx):
         result = result.replace("{" + k + "}", v)
 
     return sanitize_filename(result)
+
 
 # ----------------------------
 # Main Route
@@ -178,7 +149,7 @@ def index():
                 date_val = row["date"]
                 place = row["place"]
 
-                # Check required values
+                # 🚨 Check required values
                 if (
                     is_missing(name)
                     or is_missing(course)
@@ -225,20 +196,10 @@ def index():
 
                 try:
 
-                    # Render DOCX
                     doc.render(context)
                     doc.save(docx_path)
 
-                    # Convert DOCX -> PDF via LibreOffice
-                    docx_to_pdf_libreoffice(docx_path, pdf_dir)
-
-                    # After conversion, pdf_path should exist in pdf_dir
-                    if not os.path.exists(pdf_path):
-                        # LibreOffice might use original docx filename; rename if needed
-                        # Find any PDF with same base_name or same DOCX name
-                        possible_pdf = os.path.join(pdf_dir, base_name + ".pdf")
-                        if os.path.exists(possible_pdf):
-                            os.rename(possible_pdf, pdf_path)
+                    convert(docx_path, pdf_path)
 
                     success += 1
                     status = "Success"
@@ -260,12 +221,11 @@ def index():
 
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-                # Add all PDFs to zip
                 for f in os.listdir(pdf_dir):
                     zipf.write(os.path.join(pdf_dir, f), f)
 
-                # Add report
                 report_df = pd.DataFrame(report_rows)
+
                 report_io = io.BytesIO()
 
                 with pd.ExcelWriter(report_io, engine="openpyxl") as writer:
@@ -295,6 +255,7 @@ def index():
 
     return render_template("index.html")
 
+
 # ----------------------------
 # Download ZIP
 # ----------------------------
@@ -312,6 +273,7 @@ def download_zip(zip_id):
         download_name="Certificates.zip",
         mimetype="application/zip",
     )
+
 
 # ----------------------------
 # Start Server
