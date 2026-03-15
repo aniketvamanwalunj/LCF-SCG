@@ -3,3 +3,4 @@ pandas
 docxtpl
 openpyxl
 gunicorn
+docx2pdf
